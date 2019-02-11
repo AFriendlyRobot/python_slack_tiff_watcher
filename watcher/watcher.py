@@ -34,7 +34,7 @@ def send_message(num_changed):
 def count_tiffs(watchpath):
 	raw = os.listdir(watchpath)
 
-	return len([fn for fn in raw if fn.endswith('.tiff')])
+	return len([fn for fn in raw if fn.endswith('.tiff') or fn.endswith('.tif')])
 
 
 def send_initial(dirname, initcount):
