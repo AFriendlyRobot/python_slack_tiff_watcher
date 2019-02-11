@@ -1,1 +1,4 @@
 sample_logs/
+__pycache__/
+slack_url.py
+
