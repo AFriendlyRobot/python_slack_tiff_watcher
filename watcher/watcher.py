@@ -142,7 +142,10 @@ def run(watchpath, interval, duration):
 	pathparts = os.path.split(watchpath)
 
 	# Assuming there's at least one real part in the path. Really should be true.
-	dirname = pathparts[-1] if len(pathparts[-1]) > 0 else pathparts[-2]
+	# dirname = pathparts[-1] if len(pathparts[-1]) > 0 else pathparts[-2]
+
+	# Probably more useful to have the full/absolute path here (whatever was passed in)
+	dirname = watchpath
 	fallback_dirname = dirname
 
 	# init_message  = "NOTICE: Started watching " + dirname + ".\n"
@@ -173,9 +176,6 @@ def run(watchpath, interval, duration):
 		send_message(diff)
 
 	send_final(dirname)
-
-
-
 
 
 def main():
