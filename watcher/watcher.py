@@ -21,18 +21,217 @@ def get_timestamp():
 	return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-def send_message(num_changed, space_remaining):
+def format_file_list(file_names, file_sizes):
+	return "\n".join([format_file_size(file_sizes[i]) + file_names[i] for i in range(len(file_names))])
+
+
+def format_file_size(num_bytes):
+	units = ['B', 'KB', 'MB', 'GB', 'TB']
+
+	unit = 0
+
+	itr = num_bytes
+
+	while unit < 4 and itr > 1024:
+		itr /= 1024
+		unit += 1
+
+	return str(round(itr, 2)) + ' ' + units[unit]
+
+
+def gen_file_fields(files):
+	fields = []
+
+	for fn in list(files.keys()):
+		data = files[fn]
+
+		obj = {}
+		obj['title']  = fn
+		obj['value']  = "Last Modified: " + data['timestamp'].strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] + "\n"
+		obj['value'] += "Size: " + str(format_file_size(data['size']))
+		obj['short']  = "false"
+
+		fields.append(obj)
+
+	return fields
+
+
+def gen_removed_fields(fns):
+	fields = []
+
+	for fn in list(fns.keys()):
+		data = fns[fn]
+
+		obj = {}
+		obj['title']  = fn
+		obj['value']  = "Removed"
+		obj['short']  = "false"
+
+		fields.append(obj)
+
+	return fields
+
+
+def gen_new_file_attach(fields):
+	return {
+		"fallback": "New File(s)",
+		"title": "New File(s)",
+		"color": "good",
+		"fields": fields
+	}
+
+
+def gen_changed_file_attach(fields):
+	return {
+		"fallback": "Changed File(s)",
+		"title": "Changed File(s)",
+		"color": "warning",
+		"fields": fields
+	}
+
+
+def gen_removed_file_attach(fields):
+	return {
+		"fallback": "Removed File(s)",
+		"title": "Removed File(s)",
+		"color": "danger",
+		"fields": fields
+	}
+
+
+def send_message(num_changed, dirname, space_remaining, accumulated, total, new_files, changed_files, removed_files):
+	new_file_fields = gen_file_fields(new_files)
+	changed_file_fields = gen_file_fields(changed_files)
+	removed_file_fields = gen_removed_fields(removed_files)
+
 	timestamp = get_timestamp()
-	spacing = ''.join([' ' for c in timestamp])
-	msg  = timestamp + ": " + str(num_changed) + " .tif(f)s have been added since last poll.\n"
-	msg += spacing + '  ' + str(round(space_remaining, 2)) + " gigabytes available on the filesystem."
-	requests.post(slack_url.log_url, json={'text': msg})
+
+	fallback_msg  = str(timestamp) + ": Update watching " + dirname + ".\n"
+	fallback_msg += "            " + str(num_changed) + " .tif(f) files added since last poll.\n"
+	fallback_msg += "            " + str(accumulated) + " .tif(f) files added since watcher started.\n"
+	fallback_msg += "            " + str(total) + " total .tif(f) files in " + dirname + ".\n"
+	fallback_msg += "            " + str(round(space_remaining, 2)) + " GB available."
+
+	attachments = [{
+		"fallback": fallback_msg,
+		"title": "Watcher Update (stats)",
+		"fields": [
+			{
+				"title": "Start time",
+				"value": timestamp,
+				"short": "false"
+			},
+			{
+				"title": "Location",
+				"value": dirname,
+				"short": "false"
+			},
+			{
+				"title": "Files Added Since Last Poll",
+				"value": str(num_changed),
+				"short": "false"
+			},
+			{
+				"title": "Space Available",
+				"value": str(round(space_remaining, 2)) + " GB",
+				"short": "false"
+			},
+			{
+				"title": "Accumulated Files Since Start",
+				"value": str(accumulated),
+				"short": "false"
+			},
+			{
+				"title": "Total Files",
+				"value": str(total),
+				"short": "false"
+			}
+		]
+	}]
+
+	if len(new_file_fields) > 0:
+		attachments.append(gen_new_file_attach(new_file_fields))
+	if len(changed_file_fields) > 0:
+		attachments.append(gen_changed_file_attach(changed_file_fields))
+	if len(removed_file_fields) > 0:
+		attachments.append(gen_removed_file_attach(removed_file_fields))
+
+	requests.post(slack_url.log_url, json={
+		"text": "Watcher Update",
+		"attachments": attachments
+	})
 
 
 def count_tiffs(watchpath):
 	raw = os.listdir(watchpath)
 
 	return len([fn for fn in raw if fn.endswith('.tiff') or fn.endswith('.tif')])
+
+
+def get_tiff_names(watchpath):
+	raw = os.listdir(watchpath)
+
+	tiffs = [fn for fn in raw if fn.endswith('.tiff') or fn.endswith('.tif')]
+
+	obj = {}
+
+	for fn in tiffs:
+		obj[fn] = True
+
+	return obj
+
+
+def get_modified_tiffs(watchpath):
+	raw = os.listdir(watchpath)
+
+	tiffs = [fn for fn in raw if fn.endswith('.tiff') or fn.endswith('.tif')]
+
+	mods = [datetime.fromtimestamp(os.path.getmtime(os.path.join(watchpath, fn))) for fn in tiffs]
+
+	obj = {}
+
+	for i in range(len(tiffs)):
+		obj[tiffs[i]] = mods[i]
+
+	return obj
+
+
+def get_changed_files(old_dict, new_dates, last_timestamp):
+	removed = {}
+	changed = {}
+	news = {}
+
+	for fn in old_dict:
+		removed[fn] = True
+
+	for fn in new_dates:
+		if not fn in old_dict:
+			news[fn] = True
+
+		if new_dates[fn] > last_timestamp:
+			changed[fn] = True
+
+		if fn in removed:
+			del removed[fn]
+
+	return ( news, changed, removed )
+
+
+def get_stats_fn(watchpath, fname):
+	obj = {}
+	obj['timestamp'] = datetime.fromtimestamp(os.path.getmtime(os.path.join(watchpath, fname)))
+	obj['size'] = os.path.getsize(os.path.join(watchpath, fname))
+
+	return obj
+
+
+def get_stats_dict(watchpath, file_dict):
+	new_obj = {}
+
+	for fn in file_dict.keys():
+		new_obj[fn] = get_stats_fn(watchpath, fn)
+
+	return new_obj
 
 
 def send_initial(dirname, initcount, space):
@@ -42,7 +241,6 @@ def send_initial(dirname, initcount, space):
 	fallback_msg += str(initcount) + " .tif(f) files at start."
 
 	requests.post(slack_url.log_url, json={
-		# "text": "New watcher started",
 		"attachments": [{
 			"fallback": fallback_msg,
 			"color": "good",
@@ -65,7 +263,7 @@ def send_initial(dirname, initcount, space):
 				},
 				{
 					"title": "Space Available",
-					"value": str(space) + " GB",
+					"value": str(round(space, 2)) + " GB",
 					"short": "false"
 				}
 			]
@@ -104,14 +302,9 @@ def send_warning(diff, dirname):
 def send_final(dirname):
 	timestamp = get_timestamp()
 
-	# requests.post(slack_url.log_url, json={
-	# 	"text":	timestamp + ": Watcher stopped watching directory '" + dirname + "'."
-	# })
-
 	fallback_msg = timestamp + ": Watcher stopped watching directory '" + dirname + "'."
 
 	requests.post(slack_url.log_url, json={
-		# "text": "Watcher Stopped",
 		"attachments": [{
 			"fallback": fallback_msg,
 			"color": "warn", # Note, this is incorrect. But I like the gray color so I'm leaving it
@@ -173,7 +366,6 @@ def get_avail_space(watchpath):
 	return free_gigs
 
 
-# TODO: Input for run duration
 def run(watchpath, interval, duration, space_limit):
 	signal.signal(signal.SIGINT, signal_handler)
 
@@ -181,27 +373,19 @@ def run(watchpath, interval, duration, space_limit):
 
 	# Send startup message
 	count = count_tiffs(watchpath)
+	init_count = count
+	old_files = get_tiff_names(watchpath)
 
 	pathparts = os.path.split(watchpath)
 
-	# Assuming there's at least one real part in the path. Really should be true.
-	# dirname = pathparts[-1] if len(pathparts[-1]) > 0 else pathparts[-2]
-
-	# Probably more useful to have the full/absolute path here (whatever was passed in)
 	dirname = watchpath
 	fallback_dirname = dirname
-
-	# init_message  = "NOTICE: Started watching " + dirname + ".\n"
-	# init_message += str(count) + " .tiff files at start."
 
 	space_remaining = get_avail_space(watchpath)
 
 	send_initial(dirname, count, space_remaining)
 
-	# while True:
-	# 	r = requests.post(ENDPOINT, json={'text': 'testing'})
-	# 	print(r)
-	# 	time.sleep(1)
+	old_timestamp = datetime.now()
 
 	while duration is None or (datetime.now() - init_time).total_seconds() < (duration * 60 * 60):
 		time.sleep(interval * 60)
@@ -211,6 +395,10 @@ def run(watchpath, interval, duration, space_limit):
 		diff = 0
 
 		space_remaining = get_avail_space(watchpath)
+
+		new_mod_times = get_modified_tiffs(watchpath)
+
+		(news, changed, removed) = get_changed_files(old_files, new_mod_times, old_timestamp)
 
 		if (space_remaining < space_limit):
 			send_disk_space_warning(dirname, space_remaining)
@@ -223,7 +411,13 @@ def run(watchpath, interval, duration, space_limit):
 			diff = newcount - count
 			count = newcount
 
-		send_message(diff, space_remaining)
+		total = newcount
+		accumulated = newcount - init_count
+
+		send_message(diff, dirname, space_remaining, accumulated, total, get_stats_dict(watchpath, news), get_stats_dict(watchpath, changed), removed)
+
+		old_files = get_tiff_names(watchpath)
+		old_timestamp = datetime.now()
 
 	send_final(dirname)
 
@@ -234,7 +428,7 @@ def main():
 	parser.add_argument('-w', '--watch', help="ABSOLUTE path to DIRECTORY where .tif(f) files will be saved", required=True)
 	parser.add_argument('-i', '--interval', help="Number of MINUTES to wait between polls. Default 21", type=float, default=21)
 	parser.add_argument('-d', '--duration', help="Number of HOURS to run the watcher. Default 'None': run until manually closed.", type=float, default=None)
-	parser.add_argument('-ls', '--low_space', help="Threshold for sending a low disk space warning, in gigabytes", type=float, default=75)
+	parser.add_argument('-ls', '--low_space', help="Threshold for sending a low disk space warning, in gigabytes. Default 300.", type=float, default=300)
 
 	opts = parser.parse_args()
 
