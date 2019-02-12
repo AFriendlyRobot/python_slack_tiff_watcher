@@ -21,13 +21,11 @@ def get_timestamp():
 	return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
-def send_warning(msg):
+def send_message(num_changed, space_remaining):
 	timestamp = get_timestamp()
-
-
-def send_message(num_changed):
-	timestamp = get_timestamp()
-	msg = timestamp + ": " + str(num_changed) + " .tiffs have been added since last poll."
+	spacing = ''.join([' ' for c in timestamp])
+	msg  = timestamp + ": " + str(num_changed) + " .tif(f)s have been added since last poll.\n"
+	msg += spacing + '  ' + str(round(space_remaining, 2)) + " gigabytes available on the filesystem."
 	requests.post(slack_url.log_url, json={'text': msg})
 
 
@@ -37,11 +35,11 @@ def count_tiffs(watchpath):
 	return len([fn for fn in raw if fn.endswith('.tiff') or fn.endswith('.tif')])
 
 
-def send_initial(dirname, initcount):
+def send_initial(dirname, initcount, space):
 	timestamp = get_timestamp()
 
 	fallback_msg  = "NOTICE: Started watching " + dirname + ".\n"
-	fallback_msg += str(initcount) + " .tiff files at start."
+	fallback_msg += str(initcount) + " .tif(f) files at start."
 
 	requests.post(slack_url.log_url, json={
 		# "text": "New watcher started",
@@ -61,8 +59,13 @@ def send_initial(dirname, initcount):
 					"short": "false"
 				},
 				{
-					"title": "Initial .tiff count",
+					"title": "Initial .tif(f) count",
 					"value": str(initcount),
+					"short": "false"
+				},
+				{
+					"title": "Space Available",
+					"value": str(space) + " GB",
 					"short": "false"
 				}
 			]
@@ -78,7 +81,6 @@ def send_warning(diff, dirname):
 	timestamp = get_timestamp()
 
 	requests.post(slack_url.warn_url, json={
-		"text": "ALERT",
 		"attachments": [{
 			"fallback": fallback_msg,
 			"color": "danger",
@@ -112,7 +114,7 @@ def send_final(dirname):
 		# "text": "Watcher Stopped",
 		"attachments": [{
 			"fallback": fallback_msg,
-			"color": "warn",
+			"color": "warn", # Note, this is incorrect. But I like the gray color so I'm leaving it
 			"title": "Watcher stopped",
 			"fields": [
 				{
@@ -130,8 +132,49 @@ def send_final(dirname):
 	})
 
 
+def send_disk_space_warning(dirname, space):
+	title = "Low Disk Space"
+
+	fallback_msg = str(round(space, 2)) + " gigabytes remaining."
+
+	timestamp = get_timestamp()
+
+	requests.post(slack_url.warn_url, json={
+		"attachments": [{
+			"fallback": fallback_msg,
+			"color": "warning",
+			"title": title,
+			"fields": [
+				{
+					"title": "Timestamp",
+					"value": timestamp,
+					"short": "false"
+				},
+				{
+					"title": "Location",
+					"value": dirname,
+					"short": "false"
+				},
+				{
+					"title": "Space Remaining",
+					"value": str(round(space, 2)) + " GB",
+					"short": "false"
+				}
+			]
+		}]
+	})
+
+
+def get_avail_space(watchpath):
+	stats = os.statvfs(watchpath)
+
+	free_gigs = stats.f_frsize * stats.f_bavail / (1024 * 1024 * 1024)
+
+	return free_gigs
+
+
 # TODO: Input for run duration
-def run(watchpath, interval, duration):
+def run(watchpath, interval, duration, space_limit):
 	signal.signal(signal.SIGINT, signal_handler)
 
 	init_time = datetime.now()
@@ -151,7 +194,9 @@ def run(watchpath, interval, duration):
 	# init_message  = "NOTICE: Started watching " + dirname + ".\n"
 	# init_message += str(count) + " .tiff files at start."
 
-	send_initial(dirname, count)
+	space_remaining = get_avail_space(watchpath)
+
+	send_initial(dirname, count, space_remaining)
 
 	# while True:
 	# 	r = requests.post(ENDPOINT, json={'text': 'testing'})
@@ -165,6 +210,11 @@ def run(watchpath, interval, duration):
 
 		diff = 0
 
+		space_remaining = get_avail_space(watchpath)
+
+		if (space_remaining < space_limit):
+			send_disk_space_warning(dirname, space_remaining)
+
 		if newcount == count or newcount < count:
 			diff = newcount - count
 			count = newcount
@@ -173,7 +223,7 @@ def run(watchpath, interval, duration):
 			diff = newcount - count
 			count = newcount
 
-		send_message(diff)
+		send_message(diff, space_remaining)
 
 	send_final(dirname)
 
@@ -181,13 +231,14 @@ def run(watchpath, interval, duration):
 def main():
 	parser = argparse.ArgumentParser()
 
-	parser.add_argument('-w', '--watch', help="ABSOLUTE path to DIRECTORY where .tiff files will be saved", required=True)
+	parser.add_argument('-w', '--watch', help="ABSOLUTE path to DIRECTORY where .tif(f) files will be saved", required=True)
 	parser.add_argument('-i', '--interval', help="Number of MINUTES to wait between polls. Default 21", type=float, default=21)
 	parser.add_argument('-d', '--duration', help="Number of HOURS to run the watcher. Default 'None': run until manually closed.", type=float, default=None)
+	parser.add_argument('-ls', '--low_space', help="Threshold for sending a low disk space warning, in gigabytes", type=float, default=75)
 
 	opts = parser.parse_args()
 
-	run(opts.watch, opts.interval, opts.duration)
+	run(opts.watch, opts.interval, opts.duration, opts.low_space)
 
 
 if __name__ == "__main__":
