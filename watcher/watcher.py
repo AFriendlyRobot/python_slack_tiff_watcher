@@ -115,7 +115,7 @@ def send_message(num_changed, dirname, space_remaining, accumulated, total, new_
 
 	attachments = [{
 		"fallback": fallback_msg,
-		"title": "*" + str(timestamp) + ": Watcher Update (stats)*",
+		"title": "Stats",
 		"fields": [
 			{
 				"title": "Start time",
@@ -158,7 +158,7 @@ def send_message(num_changed, dirname, space_remaining, accumulated, total, new_
 		attachments.append(gen_removed_file_attach(removed_file_fields))
 
 	requests.post(slack_url.log_url, json={
-		"text": "Watcher Update",
+		"text": "*" + str(timestamp) + ": Watcher Update*",
 		"attachments": attachments
 	})
 
