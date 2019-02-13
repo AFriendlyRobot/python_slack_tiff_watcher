@@ -115,7 +115,7 @@ def send_message(num_changed, dirname, space_remaining, accumulated, total, new_
 
 	attachments = [{
 		"fallback": fallback_msg,
-		"title": "Watcher Update (stats)",
+		"title": "*" + str(timestamp) + ": Watcher Update (stats)*",
 		"fields": [
 			{
 				"title": "Start time",
@@ -209,7 +209,7 @@ def get_changed_files(old_dict, new_dates, last_timestamp):
 		if not fn in old_dict:
 			news[fn] = True
 
-		if new_dates[fn] > last_timestamp:
+		if new_dates[fn] > last_timestamp and not fn in news:
 			changed[fn] = True
 
 		if fn in removed:
@@ -244,7 +244,7 @@ def send_initial(dirname, initcount, space):
 	requests.post(slack_url.log_url, json={
 		"attachments": [{
 			"fallback": fallback_msg,
-			"color": "good",
+			"color": "#00FFFF",
 			"title": "New Watcher",
 			"fields": [
 				{
@@ -308,7 +308,7 @@ def send_final(dirname):
 	requests.post(slack_url.log_url, json={
 		"attachments": [{
 			"fallback": fallback_msg,
-			"color": "warn", # Note, this is incorrect. But I like the gray color so I'm leaving it
+			"color": "#0000FF",
 			"title": "Watcher stopped",
 			"fields": [
 				{
