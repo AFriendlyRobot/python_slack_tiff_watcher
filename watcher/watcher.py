@@ -3,6 +3,7 @@ import requests
 import argparse
 import sys, os
 import time
+import psutil
 
 from datetime import datetime
 
@@ -359,9 +360,7 @@ def send_disk_space_warning(dirname, space):
 
 
 def get_avail_space(watchpath):
-	stats = os.statvfs(watchpath)
-
-	free_gigs = stats.f_frsize * stats.f_bavail / (1024 * 1024 * 1024)
+	free_gigs = psutil.disk_usage(watchpath).free / (1024 * 1024 * 1024)
 
 	return free_gigs
 
